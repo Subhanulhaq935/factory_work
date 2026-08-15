@@ -52,6 +52,11 @@ export interface Sale {
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
   createdAt: string;
+  // Bill edit / history fields
+  status?: "active" | "replaced";
+  replacedBy?: string;
+  replacedFrom?: string;
+  editNote?: string;
 }
 
 // ── Customer Payment (ledger entry) ───────────────────────────────────────────

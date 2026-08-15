@@ -8,7 +8,10 @@ import {
   getCustomerById,
   putCustomer,
   addToSyncQueue,
+  deleteCustomerLocal,
 } from "@/lib/offlineDB";
+
+const MANAGER_PASSWORD = process.env.NEXT_PUBLIC_MANAGER_PASSWORD ?? "";
 
 function uuidCM(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -233,9 +236,11 @@ function RecordPaymentModal({
 function CustomerProfile({
   customerId,
   onBack,
+  onDeleted,
 }: {
   customerId: string;
   onBack: () => void;
+  onDeleted: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -244,6 +249,10 @@ function CustomerProfile({
   const [stats, setStats] = useState({ totalPurchases: 0, totalAmount: 0, totalPaid: 0, outstanding: 0 });
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [activeTab, setActiveTab] = useState<"ledger" | "purchases">("ledger");
+  // Delete state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -300,10 +309,41 @@ function CustomerProfile({
 
   const ledger = buildLedger(sales, payments);
 
+  // ── Delete handler ─────────────────────────────────────────────────────────
+  const handleDelete = async () => {
+    if (!navigator.onLine) {
+      setDeleteError("Deleting a customer requires an internet connection.");
+      return;
+    }
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const res = await fetch(`/api/customers/${customerId}`, {
+        method: "DELETE",
+        headers: { "x-manager-password": MANAGER_PASSWORD },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDeleteError(data.error ?? "Failed to delete customer.");
+        return;
+      }
+      // Remove from IndexedDB local cache
+      try {
+        await deleteCustomerLocal(customerId);
+      } catch { /* non-fatal */ }
+      setShowDeleteConfirm(false);
+      onDeleted();
+    } catch {
+      setDeleteError("Network error. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-4 sm:space-y-5">
       {/* Back button */}
-      <div>
+      <div className="flex justify-between items-center">
         <button
           onClick={onBack}
           className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-colors shadow-sm"
@@ -311,7 +351,14 @@ function CustomerProfile({
           <svg className="h-4 w-4 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" /></svg>
           Back to Customers
         </button>
+        <button
+          onClick={() => setShowDeleteConfirm(true)}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-400 transition-colors"
+        >
+          Delete Customer
+        </button>
       </div>
+
 
       {/* Customer Header card */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -577,6 +624,68 @@ function CustomerProfile({
           onSuccess={() => { setShowPaymentModal(false); load(); }}
         />
       )}
+
+      {/* Delete confirmation modal — single z-[200] dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white p-6 shadow-2xl dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4">
+            
+            {/* Header Icon + Title */}
+            <div className="flex flex-col items-center text-center">
+              <div
+                className="flex h-14 w-14 items-center justify-center rounded-2xl mb-2"
+                style={{ backgroundColor: "#fee2e2", color: "#dc2626" }}
+              >
+                <svg className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                </svg>
+              </div>
+              <h2 className="text-xl font-black text-slate-900 dark:text-white">Delete Customer?</h2>
+              <p className="mt-1 text-sm font-bold text-slate-600 dark:text-zinc-400">{customer.name}</p>
+            </div>
+
+            {/* What will happen box */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs dark:border-zinc-700 dark:bg-zinc-800 space-y-1.5">
+              <p className="font-black text-slate-800 dark:text-zinc-200">What will happen:</p>
+              <p className="text-slate-600 dark:text-zinc-400 font-medium">✓ Customer removed from active records</p>
+              <p className="text-slate-600 dark:text-zinc-400 font-medium">✓ All historical bills retained (viewable in Bills History)</p>
+              <p className="text-slate-600 dark:text-zinc-400 font-medium">✓ Bill customer names preserved for printing</p>
+              {customer.outstandingBalance > 0 && (
+                <p className="font-black text-amber-600 dark:text-amber-400 pt-1">
+                  ⚠ Outstanding balance of Rs. {customer.outstandingBalance.toLocaleString()} will remain on historical records
+                </p>
+              )}
+            </div>
+
+            {deleteError && (
+              <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-400">
+                {deleteError}
+              </p>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => { setShowDeleteConfirm(false); setDeleteError(""); }}
+                className="flex-1 rounded-xl border-2 border-slate-200 bg-slate-100 py-3 text-sm font-bold text-slate-700 hover:bg-slate-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{ backgroundColor: "#dc2626", color: "#ffffff", border: "none" }}
+                className="flex-1 rounded-xl py-3 text-sm font-black text-white shadow-lg shadow-red-500/25 hover:opacity-90 disabled:opacity-60 transition-all active:scale-[0.98] cursor-pointer"
+              >
+                {deleting ? "Deleting…" : "Yes, Delete"}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -797,7 +906,11 @@ export default function CustomerManager() {
   if (selectedId) {
     return (
       <div className="mx-auto max-w-4xl px-3 py-4 pb-20 sm:px-6 sm:py-6 sm:pb-24 lg:px-8">
-        <CustomerProfile customerId={selectedId} onBack={() => { setSelectedId(null); loadCustomers(search); }} />
+        <CustomerProfile
+          customerId={selectedId}
+          onBack={() => { setSelectedId(null); loadCustomers(search); }}
+          onDeleted={() => { setSelectedId(null); loadCustomers(search); }}
+        />
       </div>
     );
   }

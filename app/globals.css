@@ -98,9 +98,19 @@ button, a, input, select, textarea, [role="button"] {
     margin: 0;
     padding: 0;
     overscroll-behavior: auto;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  header, main, footer, button, .print\:hidden { display: none !important; }
+  /* Hide headers, footers, buttons, and anything marked print:hidden */
+  header, footer, button, .print\:hidden {
+    display: none !important;
+  }
+
+  main {
+    overflow: visible !important;
+    height: auto !important;
+  }
 
   .fixed {
     position: static !important;
@@ -109,7 +119,7 @@ button, a, input, select, textarea, [role="button"] {
     backdrop-filter: none !important;
   }
 
-  .rounded-2xl {
+  .rounded-2xl, .rounded-t-2xl {
     border-radius: 0 !important;
     border: none !important;
     box-shadow: none !important;

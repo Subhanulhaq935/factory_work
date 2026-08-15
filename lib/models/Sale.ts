@@ -20,6 +20,10 @@ export interface ISale extends Document {
   totalAmount: number;
   paymentMethod: "cash" | "card" | "credit";
   paymentStatus: "paid" | "pending";
+  status: "active" | "replaced";
+  replacedBy?: string;
+  replacedFrom?: string;
+  editNote?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,6 +89,23 @@ const SaleSchema = new Schema<ISale>(
       enum: ["paid", "pending"],
       required: true,
       default: "paid",
+    },
+    status: {
+      type: String,
+      enum: ["active", "replaced"],
+      default: "active",
+    },
+    replacedBy: {
+      type: String,
+      default: undefined,
+    },
+    replacedFrom: {
+      type: String,
+      default: undefined,
+    },
+    editNote: {
+      type: String,
+      default: undefined,
     },
   },
   {

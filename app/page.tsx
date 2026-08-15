@@ -6,6 +6,7 @@ import POSRegister   from "./components/POSRegister";
 import StoreManager  from "./components/StoreManager";
 import ReceiptModal  from "./components/ReceiptModal";
 import CustomerManager from "./components/CustomerManager";
+import BillsHistory  from "./components/BillsHistory";
 import MKSLogo       from "./components/MKSLogo";
 import type { Product, Category } from "./types";
 
@@ -115,7 +116,7 @@ export default function Home() {
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [showWelcome, setShowWelcome] = useState(true);
-  const [view, setView]               = useState<"register" | "manager" | "customers">("register");
+  const [view, setView]               = useState<"register" | "manager" | "customers" | "bills">("register");
   const [cart, setCart]               = useState<CartItem[]>([]);
 
   // Checkout modal
@@ -132,13 +133,14 @@ export default function Home() {
   // Protected sections password gate
   const [managerUnlocked,      setManagerUnlocked]      = useState(false);
   const [customersUnlocked,    setCustomersUnlocked]    = useState(false);
+  const [billsUnlocked,        setBillsUnlocked]        = useState(false);
   const [showPasswordModal,    setShowPasswordModal]    = useState(false);
-  const [passwordTargetView,   setPasswordTargetView]   = useState<"manager" | "customers">("manager");
+  const [passwordTargetView,   setPasswordTargetView]   = useState<"manager" | "customers" | "bills">("manager");
   const [passwordInput,        setPasswordInput]        = useState("");
   const [passwordError,        setPasswordError]        = useState(false);
 
   // ── View change / password gate ─────────────────────────────────────────────
-  const handleViewChange = (newView: "register" | "manager" | "customers") => {
+  const handleViewChange = (newView: "register" | "manager" | "customers" | "bills") => {
     if (newView === "manager" && !managerUnlocked) {
       setPasswordTargetView("manager");
       setPasswordInput("");
@@ -153,9 +155,17 @@ export default function Home() {
       setShowPasswordModal(true);
       return;
     }
+    if (newView === "bills" && !billsUnlocked) {
+      setPasswordTargetView("bills");
+      setPasswordInput("");
+      setPasswordError(false);
+      setShowPasswordModal(true);
+      return;
+    }
     if (newView === "register") {
       setManagerUnlocked(false);
       setCustomersUnlocked(false);
+      setBillsUnlocked(false);
     }
     setView(newView);
   };
@@ -166,9 +176,12 @@ export default function Home() {
       if (passwordTargetView === "manager") {
         setManagerUnlocked(true);
         setView("manager");
-      } else {
+      } else if (passwordTargetView === "customers") {
         setCustomersUnlocked(true);
         setView("customers");
+      } else {
+        setBillsUnlocked(true);
+        setView("bills");
       }
       setShowPasswordModal(false);
       setPasswordInput("");
@@ -387,6 +400,14 @@ export default function Home() {
           <div className="flex-1 overflow-y-auto scrollbar-thin">
             <CustomerManager />
           </div>
+        ) : view === "bills" ? (
+          <div className="flex-1 overflow-y-auto scrollbar-thin">
+            <BillsHistory
+              isOnline={isOnline}
+              customers={customers}
+              products={products}
+            />
+          </div>
         ) : (
           <div className="flex-1 overflow-y-auto scrollbar-thin">
             <StoreManager
@@ -421,12 +442,18 @@ export default function Home() {
             <div className={`flex flex-col items-center gap-3 px-6 py-7 text-center ${
               passwordTargetView === "customers"
                 ? "bg-gradient-to-br from-violet-600 to-indigo-700"
+                : passwordTargetView === "bills"
+                ? "bg-gradient-to-br from-amber-500 to-orange-600"
                 : "bg-gradient-to-br from-indigo-600 to-violet-700"
             }`}>
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-sm shadow-lg">
                 {passwordTargetView === "customers" ? (
                   <svg className="h-7 w-7 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
+                  </svg>
+                ) : passwordTargetView === "bills" ? (
+                  <svg className="h-7 w-7 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
                   </svg>
                 ) : (
                   <svg className="h-7 w-7 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -436,11 +463,17 @@ export default function Home() {
               </div>
               <div>
                 <h2 className="text-lg font-black text-white">
-                  {passwordTargetView === "customers" ? "Customer Records & Ledger" : "Store Manager"}
+                  {passwordTargetView === "customers"
+                    ? "Customer Records & Ledger"
+                    : passwordTargetView === "bills"
+                    ? "Bills History"
+                    : "Store Manager"}
                 </h2>
                 <p className="mt-0.5 text-xs font-semibold text-violet-200">
                   {passwordTargetView === "customers"
                     ? "Enter password to access customer records & ledger"
+                    : passwordTargetView === "bills"
+                    ? "Enter password to access bills history & editing"
                     : "Enter password to access inventory manager"}
                 </p>
               </div>
@@ -487,6 +520,8 @@ export default function Home() {
                   className={`flex-1 rounded-xl py-2.5 text-sm font-semibold text-white shadow-lg transition-all active:scale-95 ${
                     passwordTargetView === "customers"
                       ? "bg-gradient-to-r from-violet-600 to-indigo-600 shadow-violet-500/25 hover:from-violet-500 hover:to-indigo-500"
+                      : passwordTargetView === "bills"
+                      ? "bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/25 hover:from-amber-400 hover:to-orange-400"
                       : "bg-gradient-to-r from-indigo-600 to-violet-600 shadow-indigo-500/25 hover:from-indigo-500 hover:to-violet-500"
                   }`}
                 >

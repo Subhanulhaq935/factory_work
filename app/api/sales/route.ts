@@ -78,22 +78,36 @@ export async function GET(req: NextRequest) {
 
     const sales = await Sale.find(query)
       .sort({ createdAt: -1 })
-      .limit(200)
+      .limit(500)
       .lean();
 
     return NextResponse.json(
       sales.map((s) => ({
         _id:            s._id?.toString(),
-        invoiceNumber:  s.invoiceNumber,
-        customerId:     s.customerId,
-        customerName:   s.customerName,
-        items:          s.items,
-        subtotal:       s.subtotal,
-        discountAmount: s.discountAmount,
-        totalAmount:    s.totalAmount,
-        paymentMethod:  s.paymentMethod,
-        paymentStatus:  s.paymentStatus,
-        createdAt:      s.createdAt?.toISOString() ?? "",
+        invoiceNumber:  s.invoiceNumber ?? "",
+        customerId:     s.customerId ?? null,
+        customerName:   s.customerName ?? null,
+        items:          (Array.isArray(s.items) ? s.items : []).map((item: import("@/lib/models/Sale").ISaleItem) => ({
+          productId:       String(item?.productId ?? ""),
+          productName:     String(item?.productName ?? "Unknown Item"),
+          productNameUrdu: String(item?.productNameUrdu ?? ""),
+          productCode:     item?.productCode ?? undefined,
+          quantity:        Number(item?.quantity ?? 1),
+          unitPrice:       Number(item?.unitPrice ?? 0),
+          totalPrice:      Number(item?.totalPrice ?? 0),
+        })),
+        subtotal:       Number(s.subtotal ?? 0),
+        discountAmount: Number(s.discountAmount ?? 0),
+        totalAmount:    Number(s.totalAmount ?? 0),
+        paymentMethod:  s.paymentMethod ?? "cash",
+        paymentStatus:  s.paymentStatus ?? "paid",
+        status:         s.status ?? "active",
+        replacedBy:     s.replacedBy ?? null,
+        replacedFrom:   s.replacedFrom ?? null,
+        editNote:       s.editNote ?? null,
+        createdAt:      s.createdAt instanceof Date
+                          ? s.createdAt.toISOString()
+                          : (s.createdAt ?? new Date().toISOString()),
       })),
       { status: 200 }
     );

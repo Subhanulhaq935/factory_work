@@ -187,6 +187,14 @@ export async function getCustomerById(customerId: string): Promise<unknown | und
   );
 }
 
+/** Delete a single customer from the local IndexedDB cache */
+export async function deleteCustomerLocal(customerId: string): Promise<void> {
+  const db = await getDB();
+  const tx  = db.transaction('customers', 'readwrite');
+  tx.objectStore('customers').delete(customerId);
+  return txPromise(tx);
+}
+
 /**
  * Search customers locally by name or phone.
  * Does a case-insensitive substring match over all cached customers.

@@ -65,11 +65,18 @@ export function useOfflineData(): OfflineDataResult {
     // ── Try network first ───────────────────────────────────────────────────
     if (navigator.onLine) {
       try {
-        const [prodRes, catRes, custRes] = await Promise.all([
-          fetch('/api/products'),
-          fetch('/api/categories'),
-          fetch('/api/customers?limit=1000'),   // full-sync: no search filter
-        ]);
+        const fetchAll = () =>
+          Promise.all([
+            fetch('/api/products'),
+            fetch('/api/categories'),
+            fetch('/api/customers?limit=1000'),
+          ]);
+
+        let [prodRes, catRes, custRes] = await fetchAll().catch(async () => {
+          // If transient error (e.g. route compilation on cold start), wait 1s and retry once
+          await new Promise((r) => setTimeout(r, 1000));
+          return fetchAll();
+        });
 
         // First-load retry on 5xx / 405
         if (!prodRes.ok || !catRes.ok) {

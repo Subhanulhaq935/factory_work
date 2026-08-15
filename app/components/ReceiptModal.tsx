@@ -19,6 +19,11 @@ interface ReceiptModalProps {
   customerPhone?: string;
   invoiceNumber: string;
   paymentMethod?: "cash" | "card" | "credit";
+  createdAt?: string;
+  status?: "active" | "replaced";
+  replacedFrom?: string;
+  replacedBy?: string;
+  editNote?: string;
 }
 
 const SHOP = {
@@ -38,6 +43,11 @@ export default function ReceiptModal({
   customerPhone,
   invoiceNumber,
   paymentMethod = "cash",
+  createdAt,
+  status,
+  replacedFrom,
+  replacedBy,
+  editNote,
 }: ReceiptModalProps) {
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -45,15 +55,112 @@ export default function ReceiptModal({
 
   const subtotal = totalAmount + discountAmount;
 
-  const currentDate = new Date().toLocaleDateString("en-PK", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-  const currentTime = new Date().toLocaleTimeString("en-PK", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const dateObj = createdAt ? new Date(createdAt) : new Date();
+  const currentDate = isNaN(dateObj.getTime())
+    ? new Date().toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" })
+    : dateObj.toLocaleDateString("en-PK", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+  const currentTime = isNaN(dateObj.getTime())
+    ? new Date().toLocaleTimeString("en-PK", { hour: "2-digit", minute: "2-digit" })
+    : dateObj.toLocaleTimeString("en-PK", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
+  const handlePrint = () => {
+    if (!printRef.current) {
+      window.print();
+      return;
+    }
+
+    try {
+      const printContent = printRef.current.innerHTML;
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.id = "receipt-print-frame";
+
+      document.body.appendChild(iframe);
+
+      const frameDoc = iframe.contentWindow?.document || iframe.contentDocument;
+      if (!frameDoc) {
+        window.print();
+        return;
+      }
+
+      // Collect all stylesheets and style tags from current document
+      const styleTags = Array.from(document.querySelectorAll("style, link[rel='stylesheet']"))
+        .map((el) => el.outerHTML)
+        .join("\n");
+
+      frameDoc.open();
+      frameDoc.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice - ${invoiceNumber}</title>
+  ${styleTags}
+  <style>
+    @page {
+      margin: 10mm 15mm;
+      size: auto;
+    }
+    body {
+      background: white !important;
+      color: #09090b !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .print\\:hidden { display: none !important; }
+    .print\\:overflow-visible { overflow: visible !important; }
+    .print\\:bg-white { background-color: white !important; }
+    .print\\:px-6 { padding-left: 1.5rem !important; padding-right: 1.5rem !important; }
+    .print\\:pt-4 { padding-top: 1rem !important; }
+    .print\\:scale-90 { transform: scale(0.9) !important; }
+    .print\\:origin-left { transform-origin: left !important; }
+  </style>
+</head>
+<body class="bg-white text-zinc-900">
+  <div>${printContent}</div>
+</body>
+</html>`);
+      frameDoc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.warn("[Print] iframe print failed, falling back to window.print:", e);
+          window.print();
+        } finally {
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+          }, 1500);
+        }
+      }, 250);
+    } catch (e) {
+      console.warn("[Print] error preparing print frame:", e);
+      window.print();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 backdrop-blur-sm sm:items-center sm:p-4 print:relative print:inset-auto print:bg-transparent print:p-0 print:backdrop-blur-none">
@@ -137,6 +244,21 @@ export default function ReceiptModal({
                     <p>
                       <span className="font-semibold text-zinc-700">Phone:</span>{" "}
                       <span className="font-black text-zinc-900">{customerPhone}</span>
+                    </p>
+                  )}
+                  {status === "replaced" && replacedBy && (
+                    <p className="text-amber-700 font-bold">
+                      <span>Status:</span> Replaced by {replacedBy}
+                    </p>
+                  )}
+                  {replacedFrom && (
+                    <p className="text-indigo-700 font-bold">
+                      <span>Edited From:</span> {replacedFrom}
+                    </p>
+                  )}
+                  {editNote && (
+                    <p className="text-zinc-600 italic">
+                      <span>Note:</span> {editNote}
                     </p>
                   )}
                 </div>
@@ -280,14 +402,16 @@ export default function ReceiptModal({
         {/* ── Action buttons (screen only) ── */}
         <div className="flex gap-3 border-t border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-800/30 sm:px-6 sm:py-4 print:hidden pb-safe">
           <button
+            type="button"
             onClick={onClose}
-            className="flex-1 rounded-xl border-2 border-zinc-200 bg-white py-3 text-sm font-bold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+            className="flex-1 rounded-xl border-2 border-zinc-200 bg-white py-3 text-sm font-bold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 cursor-pointer"
           >
-            New Sale
+            {createdAt ? "Close" : "New Sale"}
           </button>
           <button
-            onClick={() => window.print()}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-zinc-800 to-zinc-900 py-3 text-sm font-bold text-white shadow-lg transition-all hover:from-zinc-700 hover:to-zinc-800"
+            type="button"
+            onClick={handlePrint}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-zinc-800 to-zinc-900 py-3 text-sm font-bold text-white shadow-lg transition-all hover:from-zinc-700 hover:to-zinc-800 cursor-pointer"
           >
             <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.821V21h10.56v-7.179m-10.56 0A2.25 2.25 0 0 1 4.5 11.58V8.25a2.25 2.25 0 0 1 2.25-2.25h10.56A2.25 2.25 0 0 1 19.5 8.25v3.33a2.25 2.25 0 0 1-2.22 2.241m-10.56 0h10.56M9 3h6m-6 3h6m-9 9h.008v.008H3.75V15Zm1.5 0h.008v.008H5.25V15Z" />

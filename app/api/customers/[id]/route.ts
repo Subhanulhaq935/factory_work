@@ -4,6 +4,14 @@ import Customer from "@/lib/models/Customer";
 import Sale from "@/lib/models/Sale";
 import CustomerPayment from "@/lib/models/CustomerPayment";
 
+// ── Server-side password helper ──────────────────────────────────────────────
+function checkManagerPassword(req: NextRequest): boolean {
+  const pwd = process.env.MANAGER_PASSWORD ?? process.env.NEXT_PUBLIC_MANAGER_PASSWORD ?? "";
+  if (!pwd) return true; // No password configured → open
+  const header = req.headers.get("x-manager-password") ?? "";
+  return header === pwd;
+}
+
 // GET /api/customers/[id] — single customer with summary stats
 export async function GET(
   _req: NextRequest,
@@ -130,5 +138,46 @@ export async function PUT(
   } catch (error) {
     console.error("PUT /api/customers/[id] error:", error);
     return NextResponse.json({ error: "Failed to update customer" }, { status: 500 });
+  }
+}
+
+// DELETE /api/customers/[id] — remove customer record (preserves sales & payments)
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    // ── Server-side password validation ─────────────────────────────────────
+    if (!checkManagerPassword(req)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    await dbConnect();
+    const { id } = await params;
+
+    // Find the customer first so we can report its name in the response
+    const customer = await Customer.findOne({ customerId: id }).lean();
+    if (!customer) {
+      return NextResponse.json({ error: "Customer not found" }, { status: 404 });
+    }
+
+    // Delete the customer document
+    // NOTE: Sales and payments are intentionally NOT deleted.
+    // They retain the denormalized customerName & customerId fields
+    // so bills history, ledger, and print remain fully intact.
+    await Customer.deleteOne({ customerId: id });
+
+    return NextResponse.json(
+      {
+        deleted: true,
+        customerId: id,
+        name: customer.name,
+        outstandingBalance: customer.outstandingBalance,
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("DELETE /api/customers/[id] error:", error);
+    return NextResponse.json({ error: "Failed to delete customer" }, { status: 500 });
   }
 }
