@@ -177,15 +177,19 @@ export default function POSRegister({
     return () => clearTimeout(t);
   }, [customerSearch, searchCustomers]);
 
-  // Close customer dropdown on outside click
+  // Close customer dropdown on outside click/touch (desktop only — mobile uses inline dropdown)
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handler = (e: MouseEvent | TouchEvent) => {
       if (customerDropdownRef.current && !customerDropdownRef.current.contains(e.target as Node)) {
         setCustomerSearchOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler as EventListener, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler as EventListener);
+    };
   }, []);
 
   // ── Add-new-customer — works online and offline ───────────────────────────
@@ -672,14 +676,23 @@ export default function POSRegister({
                         </button>
                       </div>
 
-                      {/* Search Dropdown */}
+                      {/* Search Dropdown — upward, above cart footer */}
                       {customerSearchOpen && (customerResults.length > 0 || customerSearch.trim()) && (
-                        <div className="absolute bottom-full mb-1 z-50 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800 max-h-48 overflow-y-auto">
+                        <div
+                          className="absolute bottom-full left-0 right-0 mb-1 z-[200] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800"
+                          style={{ maxHeight: "12rem", overflowY: "auto" }}
+                        >
                           {customerResults.map((c) => (
                             <button
                               key={c.customerId}
-                              onClick={() => { setSelectedCustomer(c); setCustomerSearch(""); setCustomerSearchOpen(false); }}
-                              className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-violet-50 dark:hover:bg-violet-950/20 border-b border-slate-100 dark:border-zinc-700/60 last:border-0"
+                              type="button"
+                              onPointerDown={(e) => {
+                                e.preventDefault();
+                                setSelectedCustomer(c);
+                                setCustomerSearch("");
+                                setCustomerSearchOpen(false);
+                              }}
+                              className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-violet-50 active:bg-violet-100 dark:hover:bg-violet-950/20 border-b border-slate-100 dark:border-zinc-700/60 last:border-0 cursor-pointer touch-manipulation"
                             >
                               <div className="min-w-0 flex-1 pr-2">
                                 <p className="text-xs font-black text-slate-900 dark:text-white truncate">{c.name}</p>
@@ -693,8 +706,13 @@ export default function POSRegister({
                             </button>
                           ))}
                           <button
-                            onClick={() => { setShowAddCustomerForm(true); setCustomerSearchOpen(false); }}
-                            className="flex w-full items-center gap-1.5 bg-slate-50 px-3 py-2 text-xs font-black text-violet-600 hover:bg-violet-50 dark:bg-zinc-800/80 dark:text-violet-400"
+                            type="button"
+                            onPointerDown={(e) => {
+                              e.preventDefault();
+                              setShowAddCustomerForm(true);
+                              setCustomerSearchOpen(false);
+                            }}
+                            className="flex w-full items-center gap-1.5 bg-slate-50 px-3 py-2.5 text-xs font-black text-violet-600 hover:bg-violet-50 active:bg-violet-100 dark:bg-zinc-800/80 dark:text-violet-400 cursor-pointer touch-manipulation"
                           >
                             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                             Add New Customer
@@ -934,92 +952,109 @@ export default function POSRegister({
           <div className="space-y-2 rounded-xl bg-slate-50 p-2.5 dark:bg-zinc-800/60 border border-slate-100 dark:border-zinc-700/60">
 
             {/* Customer selector (mobile) */}
-            <div>
+            <div className="relative">
               {selectedCustomer ? (
-                <div className="flex items-center justify-between rounded-lg border border-violet-300 bg-violet-50 px-2.5 py-1.5 dark:border-violet-700 dark:bg-violet-950/30">
+                <div className="flex items-center justify-between rounded-lg border border-violet-300 bg-violet-50 px-2.5 py-2 dark:border-violet-700 dark:bg-violet-950/30">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-black text-violet-900 dark:text-violet-200">{selectedCustomer.name}</p>
                     <p className="text-[10px] font-bold text-violet-600 dark:text-violet-400">📞 {selectedCustomer.phone}</p>
                   </div>
                   <button
-                    onClick={() => { setSelectedCustomer(null); setCustomerSearch(""); }}
-                    className="ml-1 rounded-md p-1 text-violet-400 hover:bg-violet-100 hover:text-violet-700"
+                    type="button"
+                    onPointerDown={(e) => { e.preventDefault(); setSelectedCustomer(null); setCustomerSearch(""); }}
+                    className="ml-2 flex h-7 w-7 items-center justify-center rounded-md text-violet-400 hover:bg-violet-100 hover:text-violet-700 touch-manipulation"
                   >
                     <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
                   </button>
                 </div>
               ) : showAddCustomerForm ? (
-                <div className="space-y-1.5 rounded-lg border border-violet-300 bg-white p-2 dark:border-violet-700 dark:bg-zinc-800 shadow-md">
+                <div className="space-y-2 rounded-lg border border-violet-300 bg-white p-3 dark:border-violet-700 dark:bg-zinc-800 shadow-md">
                   <p className="text-[10px] font-black uppercase tracking-wider text-violet-700 dark:text-violet-400">New Customer</p>
                   <input
                     type="text"
                     placeholder="Full Name *"
                     value={newCustName}
                     onChange={(e) => setNewCustName(e.target.value)}
-                    className="block w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold text-slate-900 focus:border-violet-400 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-white"
+                    className="block w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900 focus:border-violet-400 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-white"
                   />
                   <input
                     type="tel"
                     placeholder="Phone Number *"
                     value={newCustPhone}
                     onChange={(e) => setNewCustPhone(e.target.value)}
-                    className="block w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold text-slate-900 focus:border-violet-400 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-white"
+                    className="block w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900 focus:border-violet-400 focus:outline-none dark:border-zinc-600 dark:bg-zinc-700 dark:text-white"
                   />
                   {addCustomerError && <p className="text-[10px] font-bold text-rose-600">{addCustomerError}</p>}
-                  <div className="flex gap-1.5 pt-0.5">
+                  <div className="flex gap-2 pt-1">
                     <button
+                      type="button"
                       onClick={() => { setShowAddCustomerForm(false); setAddCustomerError(""); }}
-                      className="flex-1 rounded-md border border-slate-200 py-1 text-[10px] font-bold text-slate-600 dark:border-zinc-600 dark:text-zinc-400"
+                      className="flex-1 rounded-md border border-slate-200 py-2 text-xs font-bold text-slate-600 dark:border-zinc-600 dark:text-zinc-400 touch-manipulation"
                     >
                       Cancel
                     </button>
                     <button
+                      type="button"
                       onClick={handleAddNewCustomer}
                       disabled={addingCustomer}
-                      className="flex-1 rounded-md bg-violet-600 py-1 text-[10px] font-black text-white hover:bg-violet-500 disabled:opacity-60"
+                      className="flex-1 rounded-md bg-violet-600 py-2 text-xs font-black text-white hover:bg-violet-500 disabled:opacity-60 touch-manipulation"
                     >
                       {addingCustomer ? "Saving…" : "Save"}
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    placeholder="Customer Name / Phone…"
-                    value={customerSearch}
-                    onChange={(e) => { setCustomerSearch(e.target.value); setCustomerSearchOpen(true); }}
-                    onFocus={() => setCustomerSearchOpen(true)}
-                    className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:border-violet-400 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-white"
-                  />
-                  <button
-                    onClick={() => setShowAddCustomerForm(true)}
-                    className="rounded-lg border border-violet-300 bg-violet-50 px-2.5 py-1.5 text-[10px] font-black text-violet-700 dark:border-violet-700 dark:bg-violet-950/20 dark:text-violet-400 whitespace-nowrap"
-                  >
-                    + New
-                  </button>
-                </div>
-              )}
-              {/* Mobile search results */}
-              {customerSearchOpen && customerResults.length > 0 && !selectedCustomer && !showAddCustomerForm && (
-                <div className="mt-1 max-h-36 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
-                  {customerResults.map((c) => (
+                <div>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Customer Name / Phone…"
+                      value={customerSearch}
+                      onChange={(e) => { setCustomerSearch(e.target.value); setCustomerSearchOpen(true); }}
+                      onFocus={() => setCustomerSearchOpen(true)}
+                      className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:border-violet-400 focus:outline-none dark:border-zinc-600 dark:bg-zinc-800 dark:text-white touch-manipulation"
+                    />
                     <button
-                      key={c.customerId}
-                      onClick={() => { setSelectedCustomer(c); setCustomerSearch(""); setCustomerSearchOpen(false); }}
-                      className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-violet-50 dark:hover:bg-violet-950/20 border-b border-slate-100 dark:border-zinc-700/60 last:border-0"
+                      type="button"
+                      onPointerDown={(e) => { e.preventDefault(); setShowAddCustomerForm(true); }}
+                      className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700 dark:border-violet-700 dark:bg-violet-950/20 dark:text-violet-400 whitespace-nowrap touch-manipulation"
                     >
-                      <div className="min-w-0 flex-1 pr-2">
-                        <p className="text-xs font-black text-slate-900 dark:text-white truncate">{c.name}</p>
-                        <p className="text-[10px] font-bold text-slate-400 dark:text-zinc-400">📞 {c.phone}</p>
-                      </div>
-                      {c.outstandingBalance > 0 && (
-                        <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-black text-rose-700 dark:bg-rose-950/30 dark:text-rose-400 whitespace-nowrap">
-                          Due: Rs.{c.outstandingBalance.toLocaleString()}
-                        </span>
-                      )}
+                      + New
                     </button>
-                  ))}
+                  </div>
+
+                  {/* Mobile search results — inline (no absolute positioning to avoid clipping issues) */}
+                  {customerSearchOpen && customerResults.length > 0 && !selectedCustomer && !showAddCustomerForm && (
+                    <div
+                      className="mt-1.5 rounded-xl border border-slate-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                      style={{ maxHeight: "11rem", overflowY: "auto", WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+                    >
+                      {customerResults.map((c) => (
+                        <button
+                          key={c.customerId}
+                          type="button"
+                          onPointerDown={(e) => {
+                            e.preventDefault();
+                            setSelectedCustomer(c);
+                            setCustomerSearch("");
+                            setCustomerSearchOpen(false);
+                          }}
+                          className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-violet-50 active:bg-violet-100 dark:hover:bg-violet-950/20 border-b border-slate-100 dark:border-zinc-700/60 last:border-0 cursor-pointer touch-manipulation"
+                          style={{ minHeight: "48px" }}
+                        >
+                          <div className="min-w-0 flex-1 pr-2">
+                            <p className="text-sm font-black text-slate-900 dark:text-white truncate">{c.name}</p>
+                            <p className="text-xs font-bold text-slate-400 dark:text-zinc-400">📞 {c.phone}</p>
+                          </div>
+                          {c.outstandingBalance > 0 && (
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-black text-rose-700 dark:bg-rose-950/30 dark:text-rose-400 whitespace-nowrap">
+                              Due: Rs.{c.outstandingBalance.toLocaleString()}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
