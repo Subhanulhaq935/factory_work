@@ -70,16 +70,16 @@ export interface CustomerPayment {
   createdAt: string;
 }
 
-// ── Ledger Row (computed, for display) ───────────────────────────────────────
-
 export interface LedgerRow {
   date: string;
   description: string;
   invoiceNumber?: string;
-  debit: number;   // Amount owed (credit sale)
-  credit: number;  // Amount paid
-  balance: number; // Running balance
-  type: "sale" | "payment";
+  debit: number;   // Amount owed / billed
+  credit: number;  // Amount paid / settled
+  balance: number; // Running outstanding balance
+  type: "credit_sale" | "cash_sale" | "payment" | "sale";
+  paymentMethod?: string;
+  notes?: string;
 }
 
 // ── Customer Summary Stats ────────────────────────────────────────────────────

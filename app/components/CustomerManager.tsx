@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { Customer, Sale, CustomerPayment, LedgerRow } from "../types";
+import MKSLogo from "./MKSLogo";
 import {
   saveCustomers,
   searchCustomersLocal,
@@ -12,6 +13,13 @@ import {
 } from "@/lib/offlineDB";
 
 const MANAGER_PASSWORD = process.env.NEXT_PUBLIC_MANAGER_PASSWORD ?? "";
+
+const SHOP = {
+  name: "Shabbir Khan Auto Body Parts",
+  nameUrdu: "شبیر خان آٹو باڈی پارٹس",
+  address: "Bara Sandha Stop, T 4, Band Road, Lahore",
+  phones: ["0300-4254118", "0300-4177275", "0334-0450186"],
+};
 
 function uuidCM(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -38,38 +46,69 @@ function pmLabel(pm: string) {
 function buildLedger(sales: Sale[], payments: CustomerPayment[]): LedgerRow[] {
   const rows: LedgerRow[] = [];
 
-  for (const s of sales) {
-    rows.push({
-      date:          s.createdAt,
-      description:   s.paymentMethod === "credit" ? "Credit Sale" : "Sale",
-      invoiceNumber: s.invoiceNumber,
-      debit:         s.paymentMethod === "credit" ? s.totalAmount : 0,
-      credit:        s.paymentMethod !== "credit" ? s.totalAmount : 0,
-      balance:       0,
-      type:          "sale",
-    });
+  // Filter out any replaced sales
+  const activeSales = sales.filter((s) => s.status !== "replaced");
+
+  for (const s of activeSales) {
+    if (s.paymentMethod === "credit") {
+      rows.push({
+        date:          s.createdAt,
+        description:   "Credit Sale (Udhaar)",
+        invoiceNumber: s.invoiceNumber,
+        debit:         Number(s.totalAmount || 0),
+        credit:        0,
+        balance:       0,
+        type:          "credit_sale",
+        paymentMethod: s.paymentMethod,
+      });
+    } else {
+      rows.push({
+        date:          s.createdAt,
+        description:   s.paymentMethod === "card" ? "Card Sale (Paid)" : "Cash Sale (Paid)",
+        invoiceNumber: s.invoiceNumber,
+        debit:         Number(s.totalAmount || 0),
+        credit:        Number(s.totalAmount || 0),
+        balance:       0,
+        type:          "cash_sale",
+        paymentMethod: s.paymentMethod,
+      });
+    }
   }
 
   for (const p of payments) {
+    const methodText = p.paymentMethod === "card" ? "Card" : "Cash";
+    const desc = p.notes?.trim()
+      ? `Payment Received (${p.notes.trim()})`
+      : `Payment Received (${methodText})`;
+
     rows.push({
-      date:        p.createdAt,
-      description: "Payment Received",
-      debit:       0,
-      credit:      p.amount,
-      balance:     0,
-      type:        "payment",
+      date:          p.createdAt,
+      description:   desc,
+      invoiceNumber: undefined,
+      debit:         0,
+      credit:        Number(p.amount || 0),
+      balance:       0,
+      type:          "payment",
+      paymentMethod: p.paymentMethod,
+      notes:         p.notes,
     });
   }
 
   // Sort by date ascending to calculate running balance
   rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  // Calculate running balance (only credit sales add to debit balance)
+  // Calculate running balance:
+  // - Credit sale: adds to running balance (+debit)
+  // - Payment: reduces running balance (-credit)
+  // - Cash sale: settled upfront, no change to running balance
   let running = 0;
   for (const r of rows) {
-    if (r.type === "sale" && r.debit > 0) running += r.debit;
-    if (r.type === "payment") running -= r.credit;
-    r.balance = Math.max(0, running);
+    if (r.type === "credit_sale") {
+      running += r.debit;
+    } else if (r.type === "payment") {
+      running = Math.max(0, running - r.credit);
+    }
+    r.balance = running;
   }
 
   return rows.reverse(); // newest first for display
@@ -231,6 +270,259 @@ function RecordPaymentModal({
   );
 }
 
+// ─── Customer Statement (Ledger) Print Modal ────────────────────────────────
+
+function PrintStatementModal({
+  customer,
+  ledger,
+  stats,
+  onClose,
+}: {
+  customer: Customer;
+  ledger: LedgerRow[];
+  stats: { totalPurchases: number; totalAmount: number; totalPaid: number; outstanding: number };
+  onClose: () => void;
+}) {
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const handlePrint = () => {
+    if (!printRef.current) {
+      window.print();
+      return;
+    }
+    try {
+      const printContent = printRef.current.innerHTML;
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.id = "statement-print-frame";
+
+      document.body.appendChild(iframe);
+
+      const frameDoc = iframe.contentWindow?.document || iframe.contentDocument;
+      if (!frameDoc) {
+        window.print();
+        return;
+      }
+
+      const styleTags = Array.from(document.querySelectorAll("style, link[rel='stylesheet']"))
+        .map((el) => el.outerHTML)
+        .join("\n");
+
+      frameDoc.open();
+      frameDoc.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Customer Statement - ${customer.name}</title>
+  ${styleTags}
+  <style>
+    @page { margin: 10mm 15mm; size: auto; }
+    body {
+      background: white !important;
+      color: #09090b !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    .print\\:hidden { display: none !important; }
+  </style>
+</head>
+<body class="bg-white text-zinc-900">
+  <div>${printContent}</div>
+</body>
+</html>`);
+      frameDoc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.warn("[Print] iframe print failed:", e);
+          window.print();
+        } finally {
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+          }, 1500);
+        }
+      }, 250);
+    } catch (e) {
+      console.warn("[Print] error preparing statement print:", e);
+      window.print();
+    }
+  };
+
+  const currentDate = new Date().toLocaleDateString("en-PK", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 backdrop-blur-sm sm:items-center sm:p-4 print:relative print:inset-auto print:bg-transparent print:p-0 print:backdrop-blur-none">
+      <div className="flex w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl dark:bg-zinc-900 sm:rounded-2xl print:rounded-none print:shadow-none print:max-w-none max-h-[96vh] sm:max-h-[92vh] print:max-h-none">
+        
+        {/* Screen-only header */}
+        <div className="flex items-center justify-between bg-gradient-to-r from-violet-700 to-indigo-800 px-4 py-3 sm:px-6 print:hidden text-white">
+          <div>
+            <h3 className="text-sm sm:text-base font-black">Customer Statement / Khata</h3>
+            <p className="text-xs font-bold text-violet-200">{customer.name} · {customer.phone}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 px-3 py-1.5 text-xs font-black text-zinc-950 transition-all active:scale-95 shadow-md cursor-pointer"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0 .229 2.523a1.125 1.125 0 0 1-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0 0 21 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 0 0-1.913-.247M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 0 1 1.913-.247m10.5 0a48.536 48.536 0 0 0-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5Zm-3 0h.008v.008H15V10.5Z" />
+              </svg>
+              Print Statement
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-xl p-1.5 text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Printable Statement Sheet */}
+        <div ref={printRef} className="overflow-y-auto p-5 sm:p-6 bg-white text-zinc-900 print:overflow-visible print:p-0">
+          
+          {/* Shop Header */}
+          <div className="flex items-center justify-between border-b-2 border-zinc-900 pb-4">
+            <div className="flex items-center gap-3">
+              <MKSLogo size={54} />
+              <div>
+                <h1 className="text-base font-black tracking-tight text-zinc-950 uppercase">{SHOP.name}</h1>
+                <p className="font-urdu text-sm font-black text-amber-700" dir="rtl">{SHOP.nameUrdu}</p>
+                <p className="text-[10px] font-bold text-zinc-500 mt-0.5">{SHOP.address}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="inline-block rounded bg-zinc-900 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-white">
+                Customer Statement
+              </span>
+              <p className="text-[10px] font-bold text-zinc-500 mt-1">Date: {currentDate}</p>
+              <p className="text-[10px] font-bold text-zinc-500">📞 {SHOP.phones[0]}</p>
+            </div>
+          </div>
+
+          {/* Customer Details Box */}
+          <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Customer Account</p>
+                <p className="text-sm font-black text-zinc-900">{customer.name}</p>
+                <p className="font-bold text-zinc-600">📞 {customer.phone}</p>
+                {customer.address && <p className="text-zinc-500">📍 {customer.address}</p>}
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Account ID</p>
+                <p className="font-mono font-black text-zinc-900">{customer.customerId}</p>
+                <p className="text-[10px] font-bold text-zinc-500 mt-1">
+                  Registered: {fmtDate(customer.createdAt)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 3 Summary Stats in Print */}
+          <div className="mt-3 grid grid-cols-3 divide-x border border-zinc-900 rounded-lg overflow-hidden text-center text-xs">
+            <div className="p-2 bg-zinc-50">
+              <p className="text-[9px] font-black uppercase text-zinc-500">Total Spending</p>
+              <p className="font-black text-zinc-900">Rs. {stats.totalAmount.toLocaleString()}</p>
+              <p className="text-[8px] font-bold text-zinc-400">({stats.totalPurchases} Bills)</p>
+            </div>
+            <div className="p-2 bg-zinc-50">
+              <p className="text-[9px] font-black uppercase text-zinc-500">Total Paid</p>
+              <p className="font-black text-emerald-700">Rs. {stats.totalPaid.toLocaleString()}</p>
+              <p className="text-[8px] font-bold text-zinc-400">(Cash + Payments)</p>
+            </div>
+            <div className="p-2 bg-zinc-100">
+              <p className="text-[9px] font-black uppercase text-zinc-700">Outstanding Balance</p>
+              <p className={`font-black text-sm ${stats.outstanding > 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                Rs. {stats.outstanding.toLocaleString()}
+              </p>
+              <p className="text-[8px] font-black text-zinc-500">
+                {stats.outstanding > 0 ? "UDHAAR DUE" : "CLEAR ✓"}
+              </p>
+            </div>
+          </div>
+
+          {/* Ledger Table */}
+          <div className="mt-4">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b-2 border-zinc-900 bg-zinc-100 text-[10px] font-black uppercase tracking-wider text-zinc-800">
+                  <th className="py-2 px-2">Date</th>
+                  <th className="py-2 px-2">Description</th>
+                  <th className="py-2 px-2">Bill / Ref #</th>
+                  <th className="py-2 px-2 text-right">Debit (+Rs.)</th>
+                  <th className="py-2 px-2 text-right">Credit (−Rs.)</th>
+                  <th className="py-2 px-2 text-right">Balance (Rs.)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200">
+                {ledger.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-4 text-center text-zinc-400">No transactions recorded.</td>
+                  </tr>
+                ) : (
+                  ledger.map((r, i) => (
+                    <tr key={i} className="text-zinc-800">
+                      <td className="py-1.5 px-2 font-medium whitespace-nowrap">{fmtDate(r.date)}</td>
+                      <td className="py-1.5 px-2 font-bold">{r.description}</td>
+                      <td className="py-1.5 px-2 font-mono text-[11px]">{r.invoiceNumber ?? "—"}</td>
+                      <td className="py-1.5 px-2 text-right font-black">
+                        {r.debit > 0 ? r.debit.toLocaleString() : "—"}
+                      </td>
+                      <td className="py-1.5 px-2 text-right font-black">
+                        {r.credit > 0 ? r.credit.toLocaleString() : "—"}
+                      </td>
+                      <td className="py-1.5 px-2 text-right font-black">
+                        Rs. {r.balance.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Footer note */}
+          <div className="mt-8 pt-4 border-t border-zinc-200 flex justify-between items-end text-[10px] text-zinc-500">
+            <div>
+              <p className="font-bold">Thank you for your business!</p>
+              <p className="text-[9px]">Computer generated statement · Shabbir Khan Auto Body Parts</p>
+            </div>
+            <div className="text-center">
+              <div className="w-32 border-b border-zinc-400 mb-1" />
+              <p className="font-bold">Authorized Signature</p>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // ─── Customer Profile ─────────────────────────────────────────────────────────
 
 function CustomerProfile({
@@ -248,6 +540,7 @@ function CustomerProfile({
   const [payments, setPayments] = useState<CustomerPayment[]>([]);
   const [stats, setStats] = useState({ totalPurchases: 0, totalAmount: 0, totalPaid: 0, outstanding: 0 });
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showStatementModal, setShowStatementModal] = useState(false);
   const [activeTab, setActiveTab] = useState<"ledger" | "purchases">("ledger");
   // Delete state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -264,7 +557,7 @@ function CustomerProfile({
           setCustomer(data.customer);
           setSales(data.sales ?? []);
           setPayments(data.payments ?? []);
-          setStats(data.stats ?? {});
+          setStats(data.stats ?? { totalPurchases: 0, totalAmount: 0, totalPaid: 0, outstanding: 0 });
           if (data.customer) {
             await putCustomer(data.customer).catch(() => {});
           }
@@ -342,23 +635,35 @@ function CustomerProfile({
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      {/* Back button */}
-      <div className="flex justify-between items-center">
+      {/* Top Navigation Bar with Back, Print Statement, Delete */}
+      <div className="flex flex-wrap justify-between items-center gap-2">
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-colors shadow-sm"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-colors shadow-sm cursor-pointer"
         >
           <svg className="h-4 w-4 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" /></svg>
           Back to Customers
         </button>
-        <button
-          onClick={() => setShowDeleteConfirm(true)}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-400 transition-colors"
-        >
-          Delete Customer
-        </button>
-      </div>
 
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowStatementModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700 hover:bg-violet-100 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-300 transition-colors shadow-sm cursor-pointer"
+          >
+            <svg className="h-4 w-4 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0 .229 2.523a1.125 1.125 0 0 1-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0 0 21 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 0 0-1.913-.247M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 0 1 1.913-.247m10.5 0a48.536 48.536 0 0 0-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5Zm-3 0h.008v.008H15V10.5Z" />
+            </svg>
+            Print Statement / Ledger
+          </button>
+          
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-600 hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-400 transition-colors cursor-pointer"
+          >
+            Delete Customer
+          </button>
+        </div>
+      </div>
 
       {/* Customer Header card */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -377,7 +682,7 @@ function CustomerProfile({
 
             {customer.outstandingBalance > 0 ? (
               <div className="flex-shrink-0 self-start sm:self-auto rounded-xl border border-white/20 bg-rose-500/30 px-3.5 py-2 text-left sm:text-right backdrop-blur-sm">
-                <p className="text-[10px] font-black uppercase tracking-wider text-rose-200">Outstanding Balance</p>
+                <p className="text-[10px] font-black uppercase tracking-wider text-rose-200">Outstanding Balance (Udhaar)</p>
                 <p className="text-base sm:text-xl font-black text-white">Rs. {customer.outstandingBalance.toLocaleString()}</p>
               </div>
             ) : (
@@ -392,16 +697,17 @@ function CustomerProfile({
         {/* 4 Summary Stats */}
         <div className="grid grid-cols-2 divide-x divide-y divide-slate-100 dark:divide-zinc-800 sm:grid-cols-4 sm:divide-y-0 bg-slate-50/50 dark:bg-zinc-900/50">
           {[
-            { label: "Total Purchases", value: `${stats.totalPurchases} bill${stats.totalPurchases !== 1 ? 's' : ''}` },
-            { label: "Total Amount", value: `Rs. ${stats.totalAmount.toLocaleString()}` },
-            { label: "Total Paid", value: `Rs. ${stats.totalPaid.toLocaleString()}` },
-            { label: "Outstanding", value: `Rs. ${stats.outstanding.toLocaleString()}`, highlight: stats.outstanding > 0 },
+            { label: "Total Purchases", value: `${stats.totalPurchases} Bill${stats.totalPurchases !== 1 ? 's' : ''}`, sub: "Active Bills" },
+            { label: "Total Spending", value: `Rs. ${stats.totalAmount.toLocaleString()}`, sub: "Cash + Credit" },
+            { label: "Total Paid", value: `Rs. ${stats.totalPaid.toLocaleString()}`, sub: "Cash & Payments" },
+            { label: "Outstanding (Udhaar)", value: `Rs. ${stats.outstanding.toLocaleString()}`, highlight: stats.outstanding > 0, sub: stats.outstanding > 0 ? "Due Balance" : "No Dues" },
           ].map((s) => (
             <div key={s.label} className="p-3 sm:p-4">
               <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-zinc-500">{s.label}</p>
               <p className={`mt-0.5 text-sm sm:text-base font-black truncate ${s.highlight ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-white"}`}>
                 {s.value}
               </p>
+              <p className="text-[10px] font-medium text-slate-400 dark:text-zinc-500">{s.sub}</p>
             </div>
           ))}
         </div>
@@ -411,7 +717,7 @@ function CustomerProfile({
       {customer.outstandingBalance > 0 && (
         <button
           onClick={() => setShowPaymentModal(true)}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 sm:py-3.5 text-xs sm:text-sm font-black text-white shadow-lg shadow-violet-500/25 hover:from-violet-500 hover:to-indigo-500 active:scale-[0.99] transition-all"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 sm:py-3.5 text-xs sm:text-sm font-black text-white shadow-lg shadow-violet-500/25 hover:from-violet-500 hover:to-indigo-500 active:scale-[0.99] transition-all cursor-pointer"
         >
           <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -426,13 +732,13 @@ function CustomerProfile({
           <button
             key={t}
             onClick={() => setActiveTab(t)}
-            className={`flex-1 rounded-lg py-2 text-xs sm:text-sm font-black transition-all ${
+            className={`flex-1 rounded-lg py-2 text-xs sm:text-sm font-black transition-all cursor-pointer ${
               activeTab === t
                 ? "bg-white text-violet-700 shadow-sm dark:bg-zinc-800 dark:text-violet-300"
                 : "text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200"
             }`}
           >
-            {t === "ledger" ? "📒 Customer Ledger" : "🛒 Purchase History"}
+            {t === "ledger" ? "📒 Customer Ledger (Khata)" : "🛒 Purchase History"}
           </button>
         ))}
       </div>
@@ -452,7 +758,7 @@ function CustomerProfile({
                   <table className="w-full min-w-[580px] text-sm">
                     <thead className="border-b-2 border-slate-900 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60">
                       <tr>
-                        {["Date", "Description", "Bill #", "Debit (Rs.)", "Credit (Rs.)", "Balance (Rs.)"].map((h, i) => (
+                        {["Date", "Description", "Bill / Ref #", "Debit (+Rs.)", "Credit (−Rs.)", "Balance (Rs.)"].map((h, i) => (
                           <th
                             key={h}
                             className={`px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-zinc-300 ${
@@ -470,21 +776,29 @@ function CustomerProfile({
                           <td className="px-4 py-3 text-xs font-bold text-slate-600 dark:text-zinc-400 whitespace-nowrap">{fmtDate(row.date)}</td>
                           <td className="px-4 py-3">
                             <span className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-black ${
-                              row.type === "sale" && row.debit > 0
+                              row.type === "credit_sale"
                                 ? "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
                                 : row.type === "payment"
                                 ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                                : "bg-slate-100 text-slate-700 dark:bg-zinc-800 dark:text-zinc-300"
+                                : "bg-violet-100 text-violet-800 dark:bg-violet-950/40 dark:text-violet-300"
                             }`}>
                               {row.description}
                             </span>
                           </td>
                           <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500 dark:text-zinc-400">{row.invoiceNumber ?? "—"}</td>
-                          <td className="px-4 py-3 text-right font-black text-rose-600 dark:text-rose-400">
-                            {row.debit > 0 ? `${row.debit.toLocaleString()}` : "—"}
+                          <td className="px-4 py-3 text-right font-black">
+                            {row.debit > 0 ? (
+                              <span className={row.type === "credit_sale" ? "text-rose-600 dark:text-rose-400" : "text-slate-700 dark:text-zinc-300"}>
+                                {row.debit.toLocaleString()}
+                              </span>
+                            ) : "—"}
                           </td>
-                          <td className="px-4 py-3 text-right font-black text-emerald-600 dark:text-emerald-400">
-                            {row.credit > 0 ? `${row.credit.toLocaleString()}` : "—"}
+                          <td className="px-4 py-3 text-right font-black">
+                            {row.credit > 0 ? (
+                              <span className={row.type === "payment" ? "text-emerald-600 dark:text-emerald-400" : "text-slate-700 dark:text-zinc-300"}>
+                                {row.credit.toLocaleString()}
+                              </span>
+                            ) : "—"}
                           </td>
                           <td className={`px-4 py-3 text-right font-black ${row.balance > 0 ? "text-rose-700 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400"}`}>
                             Rs. {row.balance.toLocaleString()}
@@ -505,11 +819,11 @@ function CustomerProfile({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className={`rounded-md px-2 py-0.5 text-[10px] font-black ${
-                        row.type === "sale" && row.debit > 0
+                        row.type === "credit_sale"
                           ? "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
                           : row.type === "payment"
                           ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                          : "bg-slate-100 text-slate-700 dark:bg-zinc-800 dark:text-zinc-300"
+                          : "bg-violet-100 text-violet-800 dark:bg-violet-950/40 dark:text-violet-300"
                       }`}>
                         {row.description}
                       </span>
@@ -518,10 +832,12 @@ function CustomerProfile({
 
                     <div className="mt-2.5 flex items-center justify-between text-xs border-t border-slate-100 dark:border-zinc-800 pt-2">
                       <span className="font-mono text-slate-500 dark:text-zinc-400">{row.invoiceNumber ? `#${row.invoiceNumber}` : "Payment"}</span>
-                      {row.debit > 0 ? (
-                        <span className="font-black text-rose-600 dark:text-rose-400">+ Rs. {row.debit.toLocaleString()}</span>
+                      {row.type === "credit_sale" ? (
+                        <span className="font-black text-rose-600 dark:text-rose-400">+ Rs. {row.debit.toLocaleString()} (Udhaar)</span>
+                      ) : row.type === "payment" ? (
+                        <span className="font-black text-emerald-600 dark:text-emerald-400">− Rs. {row.credit.toLocaleString()} (Paid)</span>
                       ) : (
-                        <span className="font-black text-emerald-600 dark:text-emerald-400">− Rs. {row.credit.toLocaleString()}</span>
+                        <span className="font-black text-slate-700 dark:text-zinc-300">Rs. {row.debit.toLocaleString()} (Settled)</span>
                       )}
                     </div>
 
@@ -614,6 +930,16 @@ function CustomerProfile({
             ))
           )}
         </div>
+      )}
+
+      {/* Statement Print Modal */}
+      {showStatementModal && (
+        <PrintStatementModal
+          customer={customer}
+          ledger={ledger}
+          stats={stats}
+          onClose={() => setShowStatementModal(false)}
+        />
       )}
 
       {/* Payment modal */}
